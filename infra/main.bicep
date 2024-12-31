@@ -9,14 +9,7 @@ param environmentName string
 @description('Primary location for all resources')
 param location string
 
-@minLength(1)
-@description('Name of the existing resource group where resources will be deployed.')
-param resourceGroupName string
-
-@description('Id of the existing resource group where resources will be deployed.')
-param resourceGroupId string = subscriptionResourceId('Microsoft.Resources/resourceGroups', resourceGroupName)
-
-@description('Other parameters remain the same as in your original file.')
+param resourceGroupName string = ''
 param containerAppsEnvironmentName string = ''
 param containerRegistryName string = ''
 param webAppName string = 'webapp'
@@ -24,57 +17,105 @@ param searchApiName string = 'search'
 param searchApiImageName string = ''
 param indexerApiName string = 'indexer'
 param indexerApiImageName string = ''
+
 param logAnalyticsName string = ''
 param applicationInsightsName string = ''
 param applicationInsightsDashboardName string = ''
+
 param searchServiceName string = ''
 param searchServiceResourceGroupName string = ''
 param searchServiceLocation string = ''
+// The free tier does not support managed identity (required) or semantic search (optional)
+@allowed(['basic', 'standard', 'standard2', 'standard3', 'storage_optimized_l1', 'storage_optimized_l2'])
 param searchServiceSkuName string
 param searchIndexName string
+
 param storageAccountName string = ''
 param storageResourceGroupName string = ''
 param storageResourceGroupLocation string = location
 param storageContainerName string = 'content'
 param storageSkuName string
+
 param openAiServiceName string = ''
 param openAiResourceGroupName string = ''
+@description('Location for the OpenAI resource group')
+@allowed(['australiaeast', 'canadaeast', 'eastus', 'eastus2', 'francecentral', 'japaneast', 'northcentralus', 'swedencentral', 'switzerlandnorth', 'uksouth', 'westeurope'])
+@metadata({
+  azd: {
+    type: 'location'
+  }
+})
 param openAiResourceGroupLocation string
 param openAiSkuName string = 'S0'
+
+@description('Location for the Static Web App')
+@allowed(['westus2', 'centralus', 'eastus2', 'westeurope', 'eastasia', 'eastasiastage'])
+@metadata({
+  azd: {
+    type: 'location'
+  }
+})
 param webAppLocation string
-param chatGptDeploymentName string
+
+param chatGptDeploymentName string // Set in main.parameters.json
 param chatGptDeploymentCapacity int = 30
-param chatGptModelName string
-param chatGptModelVersion string
+param chatGptModelName string // Set in main.parameters.json
+param chatGptModelVersion string // Set in main.parameters.json
 param embeddingDeploymentName string = 'embedding'
 param embeddingDeploymentCapacity int = 30
 param embeddingModelName string = 'text-embedding-ada-002'
+
+@description('Id of the user or app to assign application roles')
 param principalId string = ''
+
 param allowedOrigin string
+
+// Allow to override the default backend
 param backendUri string = ''
+
+// Only needed for CD due to internal policies restrictions
 param aliasTag string = ''
+// Differentiates between automated and manual deployments
 param isContinuousDeployment bool = false
 
+var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = union({ 'azd-env-name': environmentName }, empty(aliasTag) ? {} : { alias: aliasTag })
 var allowedOrigins = empty(allowedOrigin) ? [webApp.outputs.uri] : [webApp.outputs.uri, allowedOrigin]
 
+var indexerApiIdentityName = '${abbrs.managedIdentityUserAssignedIdentities}indexer-api-${resourceToken}'
+var searchApiIdentityName = '${abbrs.managedIdentityUserAssignedIdentities}search-api-${resourceToken}'
+
+// Organize resources in a resource group
 resource resourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = {
   name: resourceGroupName
 }
 
+
+resource openAiResourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = if (!empty(openAiResourceGroupName)) {
+  name: !empty(openAiResourceGroupName) ? openAiResourceGroupName : resourceGroup.name
+}
+
+resource searchServiceResourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = if (!empty(searchServiceResourceGroupName)) {
+  name: !empty(searchServiceResourceGroupName) ? searchServiceResourceGroupName : resourceGroup.name
+}
+
+resource storageResourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = if (!empty(storageResourceGroupName)) {
+  name: !empty(storageResourceGroupName) ? storageResourceGroupName : resourceGroup.name
+}
+
+// Monitor application with Azure Monitor
 module monitoring './core/monitor/monitoring.bicep' = {
   name: 'monitoring'
   scope: resourceGroup
   params: {
     location: location
     tags: tags
-    logAnalyticsName: !empty(logAnalyticsName) ? logAnalyticsName : 'log-analytics-${resourceToken}'
-    applicationInsightsName: !empty(applicationInsightsName) ? applicationInsightsName : 'app-insights-${resourceToken}'
-    applicationInsightsDashboardName: !empty(applicationInsightsDashboardName) ? applicationInsightsDashboardName : 'dashboard-${resourceToken}'
+    logAnalyticsName: !empty(logAnalyticsName) ? logAnalyticsName : '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
+    applicationInsightsName: !empty(applicationInsightsName) ? applicationInsightsName : '${abbrs.insightsComponents}${resourceToken}'
+    applicationInsightsDashboardName: !empty(applicationInsightsDashboardName) ? applicationInsightsDashboardName : '${abbrs.portalDashboards}${resourceToken}'
   }
 }
-
 
 // Container apps host (including container registry)
 module containerApps './core/host/container-apps.bicep' = {
@@ -84,7 +125,7 @@ module containerApps './core/host/container-apps.bicep' = {
     name: 'containerapps'
     containerAppsEnvironmentName: !empty(containerAppsEnvironmentName) ? containerAppsEnvironmentName : '${abbrs.appManagedEnvironments}${resourceToken}'
     containerRegistryName: !empty(containerRegistryName) ? containerRegistryName : '${abbrs.containerRegistryRegistries}${resourceToken}'
-    location: resourceGroupLocation
+    location: location
     tags: tags
     applicationInsightsName: monitoring.outputs.applicationInsightsName
     logAnalyticsWorkspaceName: monitoring.outputs.logAnalyticsWorkspaceName
@@ -98,7 +139,7 @@ module webApp './core/host/staticwebapp.bicep' = {
   scope: resourceGroup
   params: {
     name: !empty(webAppName) ? webAppName : '${abbrs.webStaticSites}web-${resourceToken}'
-    location: resourceGroupLocation
+    location: webAppLocation
     tags: union(tags, { 'azd-service-name': webAppName })
   }
 }
@@ -109,7 +150,7 @@ module searchApiIdentity 'core/security/managed-identity.bicep' = {
   scope: resourceGroup
   params: {
     name: searchApiIdentityName
-    location: resourceGroupLocation
+    location: location
   }
 }
 
@@ -190,7 +231,7 @@ module indexerApiIdentity 'core/security/managed-identity.bicep' = {
   scope: resourceGroup
   params: {
     name: indexerApiIdentityName
-    location: resourceGroupLocation
+    location: location
   }
 }
 
@@ -266,7 +307,7 @@ module indexerApi './core/host/container-app.bicep' = {
 
 module openAi 'core/ai/cognitiveservices.bicep' = {
   name: 'openai'
-  scope: openAiResourceGroup
+  scope: resourceGroup
   params: {
     name: !empty(openAiServiceName) ? openAiServiceName : '${abbrs.cognitiveServicesAccounts}${resourceToken}'
     location: openAiResourceGroupLocation
@@ -303,7 +344,7 @@ module openAi 'core/ai/cognitiveservices.bicep' = {
 
 module searchService 'core/search/search-services.bicep' = {
   name: 'search-service'
-  scope: searchServiceResourceGroup
+  scope: resourceGroup
   params: {
     name: !empty(searchServiceName) ? searchServiceName : 'gptkb-${resourceToken}'
     location: !empty(searchServiceLocation) ? searchServiceLocation : location
@@ -322,7 +363,7 @@ module searchService 'core/search/search-services.bicep' = {
 
 module storage 'core/storage/storage-account.bicep' = {
   name: 'storage'
-  scope: storageResourceGroup
+  scope: resourceGroup
   params: {
     name: !empty(storageAccountName) ? storageAccountName : '${abbrs.storageStorageAccounts}${resourceToken}'
     location: storageResourceGroupLocation
@@ -346,7 +387,7 @@ module storage 'core/storage/storage-account.bicep' = {
 
 // USER ROLES
 module openAiRoleUser 'core/security/role.bicep' = if (!isContinuousDeployment) {
-  scope: openAiResourceGroup
+  scope: resourceGroup
   name: 'openai-role-user'
   params: {
     principalId: principalId
@@ -357,7 +398,7 @@ module openAiRoleUser 'core/security/role.bicep' = if (!isContinuousDeployment) 
 }
 
 module storageContribRoleUser 'core/security/role.bicep' = if (!isContinuousDeployment) {
-  scope: storageResourceGroup
+  scope: resourceGroup
   name: 'storage-contribrole-user'
   params: {
     principalId: principalId
@@ -368,7 +409,7 @@ module storageContribRoleUser 'core/security/role.bicep' = if (!isContinuousDepl
 }
 
 module searchContribRoleUser 'core/security/role.bicep' = if (!isContinuousDeployment) {
-  scope: searchServiceResourceGroup
+  scope: resourceGroup
   name: 'search-contrib-role-user'
   params: {
     principalId: principalId
@@ -379,7 +420,7 @@ module searchContribRoleUser 'core/security/role.bicep' = if (!isContinuousDeplo
 }
 
 module searchSvcContribRoleUser 'core/security/role.bicep' = if (!isContinuousDeployment) {
-  scope: searchServiceResourceGroup
+  scope: resourceGroup
   name: 'search-svccontrib-role-user'
   params: {
     principalId: principalId
@@ -391,7 +432,7 @@ module searchSvcContribRoleUser 'core/security/role.bicep' = if (!isContinuousDe
 
 // SYSTEM IDENTITIES
 module openAiRoleSearchApi 'core/security/role.bicep' = {
-  scope: openAiResourceGroup
+  scope: resourceGroup
   name: 'openai-role-searchapi'
   params: {
     principalId: searchApi.outputs.identityPrincipalId
@@ -402,7 +443,7 @@ module openAiRoleSearchApi 'core/security/role.bicep' = {
 }
 
 module storageRoleSearchApi 'core/security/role.bicep' = {
-  scope: storageResourceGroup
+  scope: resourceGroup
   name: 'storage-role-searchapi'
   params: {
     principalId: searchApi.outputs.identityPrincipalId
@@ -413,7 +454,7 @@ module storageRoleSearchApi 'core/security/role.bicep' = {
 }
 
 module searchRoleSearchApi 'core/security/role.bicep' = {
-  scope: searchServiceResourceGroup
+  scope: resourceGroup
   name: 'search-role-searchapi'
   params: {
     principalId: searchApi.outputs.identityPrincipalId
@@ -424,7 +465,7 @@ module searchRoleSearchApi 'core/security/role.bicep' = {
 }
 
 module openAiRoleIndexerApi 'core/security/role.bicep' = {
-  scope: openAiResourceGroup
+  scope: resourceGroup
   name: 'openai-role-indexer'
   params: {
     principalId: indexerApi.outputs.identityPrincipalId
@@ -435,7 +476,7 @@ module openAiRoleIndexerApi 'core/security/role.bicep' = {
 }
 
 module storageContribRoleIndexerApi 'core/security/role.bicep' = {
-  scope: storageResourceGroup
+  scope: resourceGroup
   name: 'storage-contribrole-indexer'
   params: {
     principalId: indexerApi.outputs.identityPrincipalId
@@ -446,7 +487,7 @@ module storageContribRoleIndexerApi 'core/security/role.bicep' = {
 }
 
 module searchContribRoleIndexerApi 'core/security/role.bicep' = {
-  scope: searchServiceResourceGroup
+  scope: resourceGroup
   name: 'search-contrib-role-indexer'
   params: {
     principalId: indexerApi.outputs.identityPrincipalId
@@ -457,7 +498,7 @@ module searchContribRoleIndexerApi 'core/security/role.bicep' = {
 }
 
 module searchSvcContribRoleIndexerApi 'core/security/role.bicep' = {
-  scope: searchServiceResourceGroup
+  scope: resourceGroup
   name: 'search-svccontrib-role-indexer'
   params: {
     principalId: indexerApi.outputs.identityPrincipalId
