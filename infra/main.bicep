@@ -87,10 +87,11 @@ var indexerApiIdentityName = '${abbrs.managedIdentityUserAssignedIdentities}inde
 var searchApiIdentityName = '${abbrs.managedIdentityUserAssignedIdentities}search-api-${resourceToken}'
 
 // Organize resources in a resource group
-resource resourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = {
-  name: resourceGroupName
+resource resourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' = {
+  name: !empty(resourceGroupName) ? resourceGroupName : '${abbrs.resourcesResourceGroups}${environmentName}'
+  location: location
+  tags: tags
 }
-
 
 resource openAiResourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = if (!empty(openAiResourceGroupName)) {
   name: !empty(openAiResourceGroupName) ? openAiResourceGroupName : resourceGroup.name
@@ -307,7 +308,7 @@ module indexerApi './core/host/container-app.bicep' = {
 
 module openAi 'core/ai/cognitiveservices.bicep' = {
   name: 'openai'
-  scope: resourceGroup
+  scope: openAiResourceGroup
   params: {
     name: !empty(openAiServiceName) ? openAiServiceName : '${abbrs.cognitiveServicesAccounts}${resourceToken}'
     location: openAiResourceGroupLocation
@@ -344,7 +345,7 @@ module openAi 'core/ai/cognitiveservices.bicep' = {
 
 module searchService 'core/search/search-services.bicep' = {
   name: 'search-service'
-  scope: resourceGroup
+  scope: searchServiceResourceGroup
   params: {
     name: !empty(searchServiceName) ? searchServiceName : 'gptkb-${resourceToken}'
     location: !empty(searchServiceLocation) ? searchServiceLocation : location
@@ -363,7 +364,7 @@ module searchService 'core/search/search-services.bicep' = {
 
 module storage 'core/storage/storage-account.bicep' = {
   name: 'storage'
-  scope: resourceGroup
+  scope: storageResourceGroup
   params: {
     name: !empty(storageAccountName) ? storageAccountName : '${abbrs.storageStorageAccounts}${resourceToken}'
     location: storageResourceGroupLocation
@@ -387,7 +388,7 @@ module storage 'core/storage/storage-account.bicep' = {
 
 // USER ROLES
 module openAiRoleUser 'core/security/role.bicep' = if (!isContinuousDeployment) {
-  scope: resourceGroup
+  scope: openAiResourceGroup
   name: 'openai-role-user'
   params: {
     principalId: principalId
@@ -398,7 +399,7 @@ module openAiRoleUser 'core/security/role.bicep' = if (!isContinuousDeployment) 
 }
 
 module storageContribRoleUser 'core/security/role.bicep' = if (!isContinuousDeployment) {
-  scope: resourceGroup
+  scope: storageResourceGroup
   name: 'storage-contribrole-user'
   params: {
     principalId: principalId
@@ -409,7 +410,7 @@ module storageContribRoleUser 'core/security/role.bicep' = if (!isContinuousDepl
 }
 
 module searchContribRoleUser 'core/security/role.bicep' = if (!isContinuousDeployment) {
-  scope: resourceGroup
+  scope: searchServiceResourceGroup
   name: 'search-contrib-role-user'
   params: {
     principalId: principalId
@@ -420,7 +421,7 @@ module searchContribRoleUser 'core/security/role.bicep' = if (!isContinuousDeplo
 }
 
 module searchSvcContribRoleUser 'core/security/role.bicep' = if (!isContinuousDeployment) {
-  scope: resourceGroup
+  scope: searchServiceResourceGroup
   name: 'search-svccontrib-role-user'
   params: {
     principalId: principalId
@@ -432,7 +433,7 @@ module searchSvcContribRoleUser 'core/security/role.bicep' = if (!isContinuousDe
 
 // SYSTEM IDENTITIES
 module openAiRoleSearchApi 'core/security/role.bicep' = {
-  scope: resourceGroup
+  scope: openAiResourceGroup
   name: 'openai-role-searchapi'
   params: {
     principalId: searchApi.outputs.identityPrincipalId
@@ -443,7 +444,7 @@ module openAiRoleSearchApi 'core/security/role.bicep' = {
 }
 
 module storageRoleSearchApi 'core/security/role.bicep' = {
-  scope: resourceGroup
+  scope: storageResourceGroup
   name: 'storage-role-searchapi'
   params: {
     principalId: searchApi.outputs.identityPrincipalId
@@ -454,7 +455,7 @@ module storageRoleSearchApi 'core/security/role.bicep' = {
 }
 
 module searchRoleSearchApi 'core/security/role.bicep' = {
-  scope: resourceGroup
+  scope: searchServiceResourceGroup
   name: 'search-role-searchapi'
   params: {
     principalId: searchApi.outputs.identityPrincipalId
@@ -465,7 +466,7 @@ module searchRoleSearchApi 'core/security/role.bicep' = {
 }
 
 module openAiRoleIndexerApi 'core/security/role.bicep' = {
-  scope: resourceGroup
+  scope: openAiResourceGroup
   name: 'openai-role-indexer'
   params: {
     principalId: indexerApi.outputs.identityPrincipalId
@@ -476,7 +477,7 @@ module openAiRoleIndexerApi 'core/security/role.bicep' = {
 }
 
 module storageContribRoleIndexerApi 'core/security/role.bicep' = {
-  scope: resourceGroup
+  scope: storageResourceGroup
   name: 'storage-contribrole-indexer'
   params: {
     principalId: indexerApi.outputs.identityPrincipalId
@@ -487,7 +488,7 @@ module storageContribRoleIndexerApi 'core/security/role.bicep' = {
 }
 
 module searchContribRoleIndexerApi 'core/security/role.bicep' = {
-  scope: resourceGroup
+  scope: searchServiceResourceGroup
   name: 'search-contrib-role-indexer'
   params: {
     principalId: indexerApi.outputs.identityPrincipalId
@@ -498,7 +499,7 @@ module searchContribRoleIndexerApi 'core/security/role.bicep' = {
 }
 
 module searchSvcContribRoleIndexerApi 'core/security/role.bicep' = {
-  scope: resourceGroup
+  scope: searchServiceResourceGroup
   name: 'search-svccontrib-role-indexer'
   params: {
     principalId: indexerApi.outputs.identityPrincipalId
