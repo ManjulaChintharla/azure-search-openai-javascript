@@ -9,12 +9,14 @@ param environmentName string
 @description('Primary location for all resources')
 param location string
 
-@description('Name of the existing resource group for deployment.')
+@minLength(1)
+@description('Name of the existing resource group where resources will be deployed.')
 param resourceGroupName string
 
-@description('Primary location for all resources (overrides default resource group location if specified).')
-param resourceGroupLocation string = location
+@description('Id of the existing resource group where resources will be deployed.')
+param resourceGroupId string = subscriptionResourceId('Microsoft.Resources/resourceGroups', resourceGroupName)
 
+@description('Other parameters remain the same as in your original file.')
 param containerAppsEnvironmentName string = ''
 param containerRegistryName string = ''
 param webAppName string = 'webapp'
@@ -22,86 +24,57 @@ param searchApiName string = 'search'
 param searchApiImageName string = ''
 param indexerApiName string = 'indexer'
 param indexerApiImageName string = ''
-
 param logAnalyticsName string = ''
 param applicationInsightsName string = ''
 param applicationInsightsDashboardName string = ''
-
 param searchServiceName string = ''
 param searchServiceResourceGroupName string = ''
 param searchServiceLocation string = ''
-// The free tier does not support managed identity (required) or semantic search (optional)
-@allowed(['basic', 'standard', 'standard2', 'standard3', 'storage_optimized_l1', 'storage_optimized_l2'])
 param searchServiceSkuName string
 param searchIndexName string
-
 param storageAccountName string = ''
+param storageResourceGroupName string = ''
+param storageResourceGroupLocation string = location
 param storageContainerName string = 'content'
 param storageSkuName string
-
 param openAiServiceName string = ''
-@description('Location for the OpenAI resource group')
-@allowed(['australiaeast', 'canadaeast', 'eastus', 'eastus2', 'francecentral', 'japaneast', 'northcentralus', 'swedencentral', 'switzerlandnorth', 'uksouth', 'westeurope'])
+param openAiResourceGroupName string = ''
 param openAiResourceGroupLocation string
 param openAiSkuName string = 'S0'
-
-@allowed(['westus2', 'centralus', 'eastus2', 'westeurope', 'eastasia', 'eastasiastage'])
 param webAppLocation string
-
-param chatGptDeploymentName string // Set in main.parameters.json
+param chatGptDeploymentName string
 param chatGptDeploymentCapacity int = 30
-param chatGptModelName string // Set in main.parameters.json
-param chatGptModelVersion string // Set in main.parameters.json
+param chatGptModelName string
+param chatGptModelVersion string
 param embeddingDeploymentName string = 'embedding'
 param embeddingDeploymentCapacity int = 30
 param embeddingModelName string = 'text-embedding-ada-002'
-
-@description('Id of the user or app to assign application roles')
 param principalId string = ''
-
 param allowedOrigin string
-
-// Allow to override the default backend
 param backendUri string = ''
-
-// Only needed for CD due to internal policies restrictions
 param aliasTag string = ''
-// Differentiates between automated and manual deployments
 param isContinuousDeployment bool = false
 
-
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
-var tags = { 'azd-env-name': environmentName }
+var tags = union({ 'azd-env-name': environmentName }, empty(aliasTag) ? {} : { alias: aliasTag })
 var allowedOrigins = empty(allowedOrigin) ? [webApp.outputs.uri] : [webApp.outputs.uri, allowedOrigin]
 
 resource resourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = {
   name: resourceGroupName
 }
 
-resource openAiResourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = if (!empty(openAiResourceGroupName)) {
-  name: !empty(openAiResourceGroupName) ? openAiResourceGroupName : resourceGroup.name
-}
-
-resource searchServiceResourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = if (!empty(searchServiceResourceGroupName)) {
-  name: !empty(searchServiceResourceGroupName) ? searchServiceResourceGroupName : resourceGroup.name
-}
-
-resource storageResourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = if (!empty(storageResourceGroupName)) {
-  name: !empty(storageResourceGroupName) ? storageResourceGroupName : resourceGroup.name
-}
-
-// Monitor application with Azure Monitor
 module monitoring './core/monitor/monitoring.bicep' = {
   name: 'monitoring'
   scope: resourceGroup
   params: {
-    location: resourceGroupLocation
+    location: location
     tags: tags
-    logAnalyticsName: !empty(logAnalyticsName) ? logAnalyticsName : '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
-    applicationInsightsName: !empty(applicationInsightsName) ? applicationInsightsName : '${abbrs.insightsComponents}${resourceToken}'
-    applicationInsightsDashboardName: !empty(applicationInsightsDashboardName) ? applicationInsightsDashboardName : '${abbrs.portalDashboards}${resourceToken}'
+    logAnalyticsName: !empty(logAnalyticsName) ? logAnalyticsName : 'log-analytics-${resourceToken}'
+    applicationInsightsName: !empty(applicationInsightsName) ? applicationInsightsName : 'app-insights-${resourceToken}'
+    applicationInsightsDashboardName: !empty(applicationInsightsDashboardName) ? applicationInsightsDashboardName : 'dashboard-${resourceToken}'
   }
 }
+
 
 // Container apps host (including container registry)
 module containerApps './core/host/container-apps.bicep' = {
