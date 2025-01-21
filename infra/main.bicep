@@ -9,7 +9,9 @@ param environmentName string
 @description('Primary location for all resources')
 param location string
 
-param resourceGroupName string = ''
+@description('Name of the existing resource group to use')
+@minLength(1)
+param existingResourceGroupName string
 param containerAppsEnvironmentName string = ''
 param containerRegistryName string = ''
 param webAppName string = 'webapp'
@@ -86,11 +88,9 @@ var allowedOrigins = empty(allowedOrigin) ? [webApp.outputs.uri] : [webApp.outpu
 var indexerApiIdentityName = '${abbrs.managedIdentityUserAssignedIdentities}indexer-api-${resourceToken}'
 var searchApiIdentityName = '${abbrs.managedIdentityUserAssignedIdentities}search-api-${resourceToken}'
 
-// Organize resources in a resource group
-resource resourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' = {
-  name: !empty(resourceGroupName) ? resourceGroupName : '${abbrs.resourcesResourceGroups}${environmentName}'
-  location: location
-  tags: tags
+// Use the existing resource group
+resource resourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = {
+  name: existingResourceGroupName
 }
 
 resource openAiResourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = if (!empty(openAiResourceGroupName)) {
